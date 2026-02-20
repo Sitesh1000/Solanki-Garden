@@ -43,6 +43,15 @@ const NAV_ITEMS = [
   { id: "staff", icon: "👨‍🍳", label: "Staff" },
 ];
 
+const NAV_ROLE_ACCESS = {
+  dashboard: ["admin", "employee"],
+  tables: ["admin", "employee"],
+  menu: ["admin"],
+  orders: ["admin", "employee"],
+  billing: ["admin", "employee"],
+  staff: ["admin"],
+};
+
 let paypalSdkPromise = null;
 let paypalSdkSignature = null;
 
@@ -107,12 +116,186 @@ function loadPaypalSdk(clientId, currency, buyerCountry, sandbox) {
   return paypalSdkPromise;
 }
 
+function LoginScreen({ onLoginSuccess }) {
+  const [mode, setMode] = useState("login");
+  const [role, setRole] = useState("admin");
+  const [username, setUsername] = useState("Admin");
+  const [password, setPassword] = useState("admin123");
+  const [name, setName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (mode !== "login") return;
+    if (role === "admin") {
+      setUsername("Admin");
+      setPassword("admin123");
+    } else {
+      setUsername("");
+      setPassword("");
+    }
+    setError("");
+    setMessage("");
+  }, [role, mode]);
+
+  const submitLogin = async (e) => {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok || !data.user) {
+        throw new Error(data.error || "Login failed.");
+      }
+      onLoginSuccess(data.user);
+    } catch (err) {
+      setError(err?.message || "Login failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const submitSignup = async (e) => {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, name }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Signup failed.");
+      }
+      setMessage("Signup successful. Please login as employee.");
+      setMode("login");
+      setRole("employee");
+      setPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      setError(err?.message || "Signup failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "radial-gradient(ellipse at center, #0f2c68 0%, #051334 45%, #020a1f 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <style>{`
+        .auth-shell { width: 100%; max-width: 540px; border: 1px solid #2f5fb4; border-radius: 18px; background: linear-gradient(165deg, #102a5f 0%, #0a1f49 45%, #081736 100%); padding: 28px 28px 30px; box-shadow: 0 0 0 1px #2d63c433 inset, 0 0 70px #1d4ed833, 0 40px 80px rgba(0,0,0,0.6); position: relative; }
+        .auth-shell::before { content: ""; position: absolute; inset: -2px; border-radius: 20px; pointer-events: none; box-shadow: 0 0 25px #3b82f655; }
+        .auth-switch { display: flex; margin-bottom: 18px; border: 1px solid #2f5fb4; border-radius: 12px; overflow: hidden; background: #08173499; box-shadow: 0 0 20px #1d4ed822 inset; }
+        .auth-switch button { flex: 1; background: transparent; border: none; color: #a8b6d4; padding: 12px 8px; font-family: 'Lato', sans-serif; font-weight: 700; cursor: pointer; font-size: 16px; }
+        .auth-switch button.active { background: linear-gradient(90deg, #43c4ff, #2f8cff); color: #072349; text-shadow: 0 1px 0 #ffffff88; box-shadow: 0 0 25px #38bdf866; }
+        .auth-form { display: flex; flex-direction: column; gap: 12px; }
+        .auth-label { color: #b7c6e5; font-family: 'Lato', sans-serif; font-size: 12px; letter-spacing: 0.6px; display: block; margin-bottom: 4px; font-weight: 700; }
+        .auth-field { width: 100%; height: 34px; border: 1px solid #2f5fb4; background: linear-gradient(180deg, #0f2450 0%, #0a1a3b 100%); color: #eaf2ff; border-radius: 3px; padding: 0 10px; font-size: 14px; box-shadow: 0 0 12px #1d4ed81f inset; }
+        .auth-select { width: 130px; height: 34px; border: 1px solid #2f5fb4; background: linear-gradient(180deg, #0f2450 0%, #0a1a3b 100%); color: #eaf2ff; border-radius: 3px; padding: 0 8px; font-size: 14px; box-shadow: 0 0 12px #1d4ed81f inset; }
+        .auth-btn { margin-top: 10px; width: 100%; height: 42px; border: 1px solid #4dbdff; background: linear-gradient(90deg, #33bbff 0%, #2563ff 100%); color: #e6f4ff; font-family: 'Lato', sans-serif; font-size: 16px; font-weight: 700; cursor: pointer; border-radius: 5px; letter-spacing: 0.2px; box-shadow: 0 0 24px #3b82f655; }
+        .auth-btn:hover { filter: brightness(1.05); }
+        .auth-hint { color: #9cb2d9; font-family: 'Lato', sans-serif; font-size: 12px; }
+        .auth-msg { color: #86efac; font-family: 'Lato', sans-serif; font-size: 12px; }
+        .auth-err { color: #ef4444; font-family: 'Lato', sans-serif; font-size: 13px; font-weight: 700; }
+        .auth-field:focus, .auth-select:focus { outline: none; border-color: #60a5fa; box-shadow: 0 0 0 2px #3b82f633, 0 0 18px #2563eb3d inset; }
+        @media (max-width: 600px) {
+          .auth-shell { max-width: 100%; padding: 20px; }
+          .auth-switch button { font-size: 15px; }
+          .auth-err { font-size: 12px; }
+          .auth-btn { font-size: 16px; }
+        }
+      `}</style>
+      <div className="auth-shell">
+        <div className="auth-switch">
+          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Login</button>
+          <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>Signup</button>
+        </div>
+
+        {mode === "login" ? (
+          <form className="auth-form" onSubmit={submitLogin}>
+            <div>
+              <label className="auth-label">ROLE</label>
+              <select className="auth-select" value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="admin">Admin</option>
+                <option value="employee">Employee</option>
+              </select>
+            </div>
+            <div>
+              <label className="auth-label">USERNAME</label>
+              <input className="auth-field" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
+            </div>
+            <div>
+              <label className="auth-label">PASSWORD</label>
+              <input className="auth-field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+            </div>
+            {message && <div className="auth-msg">{message}</div>}
+            {error && <div className="auth-err">{error}</div>}
+            <button className="auth-btn" type="submit" disabled={isSubmitting} style={{ opacity: isSubmitting ? 0.7 : 1 }}>
+              {isSubmitting ? "Signing in..." : "Sign In"}
+            </button>
+          </form>
+        ) : (
+          <form className="auth-form" onSubmit={submitSignup}>
+            <div>
+              <label className="auth-label">FULL NAME</label>
+              <input className="auth-field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Employee name" />
+            </div>
+            <div>
+              <label className="auth-label">USERNAME</label>
+              <input className="auth-field" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
+            </div>
+            <div>
+              <label className="auth-label">PASSWORD</label>
+              <input className="auth-field" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+            </div>
+            <div>
+              <label className="auth-label">CONFIRM PASSWORD</label>
+              <input className="auth-field" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" />
+            </div>
+            <div className="auth-hint">Signup creates an employee account.</div>
+            {message && <div className="auth-msg">{message}</div>}
+            {error && <div className="auth-err">{error}</div>}
+            <button className="auth-btn" type="submit" disabled={isSubmitting} style={{ opacity: isSubmitting ? 0.7 : 1 }}>
+              {isSubmitting ? "Creating..." : "Create Employee Account"}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [tables, setTables] = useState(initialTables);
   const [menu, setMenu] = useState(initialMenu);
   const [orders, setOrders] = useState(initialOrders);
   const [staff, setStaff] = useState(initialStaff);
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [profileForm, setProfileForm] = useState({ name: "", email: "", avatarUrl: "" });
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [profileError, setProfileError] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const profileMenuRef = useRef(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [notification, setNotification] = useState(null);
   const [isSyncReady, setIsSyncReady] = useState(false);
@@ -122,10 +305,53 @@ export default function App() {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const availableNavItems = NAV_ITEMS.filter((item) => {
+    if (!user?.role) return false;
+    return (NAV_ROLE_ACCESS[item.id] || []).includes(user.role);
+  });
+  const activeNavItem = availableNavItems.find((item) => item.id === activeTab) || availableNavItems[0];
+  const SIDEBAR_EXPANDED_WIDTH = 240;
+  const SIDEBAR_COLLAPSED_WIDTH = 72;
+  const moduleBackground = "linear-gradient(180deg, #f8f6ef 0%, #f3efe5 100%)";
+  const profileName = profile?.name || user?.name || "User";
+  const profileEmail = profile?.email || "";
+  const profileAvatarUrl = profile?.avatarUrl || "";
+  const profileInitial = (profileName || "U").trim().charAt(0).toUpperCase();
+
   useEffect(() => {
     let active = true;
 
+    const loadSession = async () => {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (!res.ok) {
+          if (active) setUser(null);
+          return;
+        }
+        const data = await res.json();
+        if (active && data?.user) {
+          setUser(data.user);
+        }
+      } catch (err) {
+        console.error("Failed to restore login session:", err);
+        if (active) setUser(null);
+      } finally {
+        if (active) setIsAuthLoading(false);
+      }
+    };
+
+    loadSession();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+
     const loadState = async () => {
+      setIsSyncReady(false);
       try {
         const res = await fetch("/api/state");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -144,10 +370,10 @@ export default function App() {
 
     loadState();
     return () => { active = false; };
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    if (!isSyncReady) return;
+    if (!user || !isSyncReady) return;
     const timer = setTimeout(async () => {
       try {
         await fetch("/api/state", {
@@ -161,12 +387,165 @@ export default function App() {
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [tables, menu, orders, staff, isSyncReady]);
+  }, [tables, menu, orders, staff, isSyncReady, user]);
+
+  useEffect(() => {
+    if (!availableNavItems.length) return;
+    if (!availableNavItems.some((item) => item.id === activeTab)) {
+      setActiveTab(availableNavItems[0].id);
+    }
+  }, [availableNavItems, activeTab]);
+
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      return;
+    }
+    let active = true;
+    const loadProfile = async () => {
+      try {
+        const res = await fetch("/api/auth/profile");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (active && data?.user) {
+          setProfile(data.user);
+        }
+      } catch (err) {
+        console.error("Failed to load profile:", err);
+      }
+    };
+    loadProfile();
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    const onClickOutside = (event) => {
+      if (!profileMenuRef.current) return;
+      if (!profileMenuRef.current.contains(event.target)) {
+        setProfileMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+    };
+  }, []);
+
+  const onLoginSuccess = (nextUser) => {
+    setUser(nextUser);
+    setActiveTab("dashboard");
+    showNotification(`Logged in as ${nextUser.role}.`);
+  };
+
+  const openProfileEditor = () => {
+    setProfileForm({
+      name: profileName,
+      email: profileEmail,
+      avatarUrl: profileAvatarUrl,
+    });
+    setProfileError("");
+    setShowProfileModal(true);
+    setProfileMenuOpen(false);
+  };
+
+  const saveProfile = async () => {
+    setProfileBusy(true);
+    setProfileError("");
+    try {
+      const res = await fetch("/api/auth/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profileForm),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Could not update profile.");
+      }
+      setProfile(data.user);
+      setUser((prev) => (prev ? { ...prev, ...data.user } : prev));
+      setShowProfileModal(false);
+      showNotification("Profile updated.");
+    } catch (err) {
+      setProfileError(err?.message || "Could not update profile.");
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const openPasswordSettings = () => {
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    setProfileError("");
+    setShowPasswordModal(true);
+    setProfileMenuOpen(false);
+  };
+
+  const changePassword = async () => {
+    setProfileError("");
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setProfileError("New password and confirm password do not match.");
+      return;
+    }
+    setProfileBusy(true);
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Could not change password.");
+      }
+      setShowPasswordModal(false);
+      showNotification("Password changed.");
+    } catch (err) {
+      setProfileError(err?.message || "Could not change password.");
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (err) {
+      console.error("Logout request failed:", err);
+    }
+    setUser(null);
+    setProfile(null);
+    setProfileMenuOpen(false);
+    setShowProfileModal(false);
+    setShowPasswordModal(false);
+    setIsSyncReady(false);
+    setTables(initialTables);
+    setMenu(initialMenu);
+    setOrders(initialOrders);
+    setStaff(initialStaff);
+    setActiveTab("dashboard");
+    showNotification("Logged out.");
+  };
+
+  if (isAuthLoading) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0b1220", color: "#cbd5e1", fontFamily: "'Lato', sans-serif" }}>
+        Loading...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginScreen onLoginSuccess={onLoginSuccess} />;
+  }
 
   return (
     <div style={{
-      display: "flex", minHeight: "100vh", fontFamily: "'Georgia', serif",
-      background: "#0b1220", color: "#e2e8f0"
+      display: "flex", height: "100vh", overflow: "hidden", fontFamily: "'Georgia', serif",
+      background: "#f6f3ea", color: "#e2e8f0"
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Lato:wght@300;400;700&display=swap');
@@ -228,13 +607,13 @@ export default function App() {
 
       {/* Sidebar */}
       <div style={{
-        width: sidebarOpen ? 240 : 72, minHeight: "100vh",
+        width: sidebarOpen ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH, height: "100vh",
         background: "#0f172a", borderRight: "1px solid #334155",
         transition: "width 0.3s ease", overflow: "hidden", flexShrink: 0,
         display: "flex", flexDirection: "column"
       }}>
-        <div style={{ padding: "28px 16px 20px", borderBottom: "1px solid #334155" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ height: 76, padding: "0 12px", borderBottom: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
             <div style={{
               width: 40, height: 40, borderRadius: 10, flexShrink: 0,
               background: "linear-gradient(135deg, #38bdf8, #0ea5e9)",
@@ -247,10 +626,47 @@ export default function App() {
               </div>
             )}
           </div>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            style={{
+              borderRadius: 8,
+              padding: 6,
+              color: "#94a3b8",
+              background: "transparent",
+              border: "1px solid #334155",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#1e293b";
+              e.currentTarget.style.color = "#ffffff";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "#94a3b8";
+            }}
+          >
+            {sidebarOpen ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            )}
+          </button>
         </div>
 
         <nav style={{ padding: "16px 10px", flex: 1 }}>
-          {NAV_ITEMS.map(item => (
+          {availableNavItems.map(item => (
             <div key={item.id}
               className={`nav-item ${activeTab === item.id ? "active" : ""}`}
               onClick={() => setActiveTab(item.id)}
@@ -267,24 +683,185 @@ export default function App() {
           ))}
         </nav>
 
-        <div style={{ padding: "16px 10px", borderTop: "1px solid #334155" }}>
-          <div
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 10, color: "#64748b", fontSize: 20 }}
-          >
-            {sidebarOpen ? "◀" : "▶"}
-          </div>
+        <div style={{ padding: "12px 10px", borderTop: "1px solid #334155" }}>
+          {sidebarOpen && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontFamily: "'Lato', sans-serif", color: "#cbd5e1", fontSize: 12, fontWeight: 700 }}>{user.name}</div>
+              <div style={{ fontFamily: "'Lato', sans-serif", color: "#64748b", fontSize: 11, textTransform: "uppercase" }}>{user.role}</div>
+            </div>
+          )}
+          <button className="btn-outline" style={{ width: "100%", marginBottom: 10 }} onClick={logout}>
+            {sidebarOpen ? "Logout" : "↩"}
+          </button>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div style={{ flex: 1, overflow: "auto", padding: "32px" }}>
-        {activeTab === "dashboard" && <Dashboard tables={tables} orders={orders} menu={menu} staff={staff} />}
-        {activeTab === "tables" && <Tables tables={tables} setTables={setTables} showNotification={showNotification} />}
-        {activeTab === "menu" && <MenuPage menu={menu} setMenu={setMenu} showNotification={showNotification} />}
-        {activeTab === "orders" && <Orders orders={orders} setOrders={setOrders} tables={tables} menu={menu} showNotification={showNotification} />}
-        {activeTab === "billing" && <Billing orders={orders} setOrders={setOrders} tables={tables} menu={menu} showNotification={showNotification} />}
-        {activeTab === "staff" && <Staff staff={staff} setStaff={setStaff} showNotification={showNotification} />}
+      {/* Header + Main Content */}
+      <div style={{ flex: 1, minWidth: 0, height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <header style={{
+          height: 76,
+          background: "#0f172a",
+          borderBottom: "1px solid #334155",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 24px",
+        }}>
+          <div>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#38bdf8", fontWeight: 700 }}>
+              {activeNavItem?.label || "Dashboard"}
+            </div>
+            <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#64748b" }}>
+              Solanki Garden Management
+            </div>
+          </div>
+          <div ref={profileMenuRef} style={{ position: "relative" }}>
+            <button
+              type="button"
+              onClick={() => setProfileMenuOpen((prev) => !prev)}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                color: "#e2e8f0",
+                padding: "8px 10px",
+                borderRadius: 10,
+              }}
+            >
+              {profileAvatarUrl ? (
+                <img src={profileAvatarUrl} alt="Profile" style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: "1px solid #334155" }} />
+              ) : (
+                <div style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: "50%",
+                  background: "linear-gradient(135deg, #2563eb, #38bdf8)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontFamily: "'Lato', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 13,
+                }}>
+                  {profileInitial}
+                </div>
+              )}
+              <div style={{ textAlign: "left" }}>
+                <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 14, color: "#e2e8f0", fontWeight: 700 }}>{profileName}</div>
+                <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 11, color: "#64748b", textTransform: "uppercase" }}>{user.role}</div>
+              </div>
+              <span style={{ color: "#94a3b8", fontSize: 12 }}>▼</span>
+            </button>
+
+            {profileMenuOpen && (
+              <div style={{
+                position: "absolute",
+                top: "calc(100% + 8px)",
+                right: 0,
+                width: 260,
+                background: "#ffffff",
+                borderRadius: 12,
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 16px 40px rgba(2,6,23,0.25)",
+                overflow: "hidden",
+                zIndex: 1000,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 14, borderBottom: "1px solid #e5e7eb" }}>
+                  {profileAvatarUrl ? (
+                    <img src={profileAvatarUrl} alt="Profile" style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }} />
+                  ) : (
+                    <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#3b82f6", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Lato', sans-serif", fontWeight: 700 }}>
+                      {profileInitial}
+                    </div>
+                  )}
+                  <div>
+                    <div style={{ color: "#111827", fontFamily: "'Lato', sans-serif", fontWeight: 700 }}>{profileName}</div>
+                    <div style={{ color: "#6b7280", fontFamily: "'Lato', sans-serif", fontSize: 13 }}>{profileEmail || `${user.username}@local`}</div>
+                  </div>
+                </div>
+                <button type="button" onClick={openProfileEditor} style={{ width: "100%", textAlign: "left", background: "#fff", border: "none", borderBottom: "1px solid #e5e7eb", padding: "12px 14px", color: "#374151", fontFamily: "'Lato', sans-serif", cursor: "pointer" }}>
+                  Profile
+                </button>
+                <button type="button" onClick={openPasswordSettings} style={{ width: "100%", textAlign: "left", background: "#fff", border: "none", borderBottom: "1px solid #e5e7eb", padding: "12px 14px", color: "#374151", fontFamily: "'Lato', sans-serif", cursor: "pointer" }}>
+                  Settings
+                </button>
+                <button type="button" onClick={logout} style={{ width: "100%", textAlign: "left", background: "#fff", border: "none", padding: "12px 14px", color: "#ef4444", fontFamily: "'Lato', sans-serif", fontWeight: 700, cursor: "pointer" }}>
+                  Sign Out
+                </button>
+              </div>
+            )}
+          </div>
+        </header>
+
+        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "24px", background: moduleBackground }}>
+          {activeTab === "dashboard" && <Dashboard tables={tables} orders={orders} menu={menu} staff={staff} />}
+          {activeTab === "tables" && <Tables tables={tables} setTables={setTables} showNotification={showNotification} />}
+          {activeTab === "menu" && <MenuPage menu={menu} setMenu={setMenu} showNotification={showNotification} />}
+          {activeTab === "orders" && <Orders orders={orders} setOrders={setOrders} tables={tables} menu={menu} showNotification={showNotification} />}
+          {activeTab === "billing" && <Billing orders={orders} setOrders={setOrders} tables={tables} menu={menu} showNotification={showNotification} />}
+          {activeTab === "staff" && <Staff staff={staff} setStaff={setStaff} showNotification={showNotification} />}
+        </div>
+
+        {showProfileModal && (
+          <div className="modal-overlay" onClick={() => setShowProfileModal(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#38bdf8", marginBottom: 20 }}>Manage Profile</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>NAME</label>
+                  <input value={profileForm.name} onChange={(e) => setProfileForm((prev) => ({ ...prev, name: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>EMAIL</label>
+                  <input value={profileForm.email} onChange={(e) => setProfileForm((prev) => ({ ...prev, email: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>PROFILE IMAGE URL</label>
+                  <input value={profileForm.avatarUrl} onChange={(e) => setProfileForm((prev) => ({ ...prev, avatarUrl: e.target.value }))} placeholder="https://..." />
+                </div>
+                {profileError && <div style={{ color: "#fda4af", fontFamily: "'Lato', sans-serif", fontSize: 12 }}>{profileError}</div>}
+                <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                  <button className="btn-primary" style={{ flex: 1 }} onClick={saveProfile} disabled={profileBusy}>
+                    {profileBusy ? "Saving..." : "Save Profile"}
+                  </button>
+                  <button className="btn-outline" style={{ flex: 1 }} onClick={() => setShowProfileModal(false)}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showPasswordModal && (
+          <div className="modal-overlay" onClick={() => setShowPasswordModal(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#38bdf8", marginBottom: 20 }}>Change Password</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>CURRENT PASSWORD</label>
+                  <input type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>NEW PASSWORD</label>
+                  <input type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>CONFIRM NEW PASSWORD</label>
+                  <input type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
+                </div>
+                {profileError && <div style={{ color: "#fda4af", fontFamily: "'Lato', sans-serif", fontSize: 12 }}>{profileError}</div>}
+                <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                  <button className="btn-primary" style={{ flex: 1 }} onClick={changePassword} disabled={profileBusy}>
+                    {profileBusy ? "Updating..." : "Update Password"}
+                  </button>
+                  <button className="btn-outline" style={{ flex: 1 }} onClick={() => setShowPasswordModal(false)}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -597,6 +1174,7 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ tableId: "", customerName: "", items: [] });
   const [selectedItems, setSelectedItems] = useState({});
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
 
   const addOrder = () => {
     const items = Object.entries(selectedItems)
@@ -609,7 +1187,7 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
     }
 
     const total = items.reduce((s, i) => {
-      const m = menu.find(m => m.id === i.menuId);
+      const m = menu.find((x) => x.id === i.menuId);
       return s + (m ? m.price * i.qty : 0);
     }, 0);
 
@@ -628,22 +1206,24 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
         total,
       },
     ]);
-    tables.find(t => t.id === +form.tableId) && showNotification("New order placed!");
+    tables.find((t) => t.id === +form.tableId) && showNotification("New order placed!");
     setShowModal(false);
     setForm({ tableId: "", customerName: "", items: [] });
     setSelectedItems({});
   };
 
   const updateStatus = (id, status) => {
-    setOrders(orders.map(o => o.id === id ? { ...o, status } : o));
+    setOrders(orders.map((o) => (o.id === id ? { ...o, status } : o)));
     showNotification(`Order status updated to ${status}`);
   };
 
   const getOrderItems = (order) =>
-    order.items.map(i => {
-      const m = menu.find(m => m.id === i.menuId);
-      return m ? `${m.name} x${i.qty}` : "";
-    }).join(", ");
+    order.items
+      .map((i) => {
+        const m = menu.find((x) => x.id === i.menuId);
+        return m ? `${m.name} x${i.qty}` : "";
+      })
+      .join(", ");
 
   return (
     <div>
@@ -651,7 +1231,7 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
         <div>
           <div className="page-title">Order Management</div>
           <div style={{ color: "#64748b", fontFamily: "'Lato', sans-serif", marginTop: 4 }}>
-            {orders.filter(o => o.status !== "paid").length} active orders
+            {orders.filter((o) => o.status !== "paid").length} active orders
           </div>
         </div>
         <button className="btn-primary" onClick={() => setShowModal(true)}>+ New Order</button>
@@ -663,73 +1243,89 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
             No orders yet. Click "+ New Order" to start!
           </div>
         )}
-        {[...orders].reverse().map(order => (
-          <div key={order.id} className="order-card">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                  <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#38bdf8" }}>Order #{order.id}</span>
-                  <span className={`badge badge-${order.status}`}>{order.status}</span>
+
+        {[...orders].reverse().map((order) => {
+          const isExpanded = expandedOrderId === order.id;
+          return (
+            <div key={order.id} className="order-card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                <div>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#38bdf8" }}>Order #{order.id}</div>
+                  <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 13, color: "#94a3b8", marginTop: 2 }}>
+                    Customer: {order.customerName || "Walk-in Guest"}
+                  </div>
                 </div>
-                <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 13, color: "#94a3b8" }}>
-                  🪑 Table {order.tableId} &nbsp;•&nbsp; 🕐 {order.time}
-                </div>
-                <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 13, color: "#94a3b8", marginTop: 4 }}>
-                  Customer: {order.customerName || "Walk-in Guest"}
-                </div>
-                <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 13, color: "#cbd5e1", marginTop: 8 }}>
-                  {getOrderItems(order)}
-                </div>
+                <button className="btn-outline" style={{ fontSize: 12, minWidth: 88 }} onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}>
+                  {isExpanded ? "Hide" : "Details"}
+                </button>
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, color: "#38bdf8", fontWeight: 700 }}>₹{order.total}</div>
-                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  {order.status === "preparing" && (
-                    <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => updateStatus(order.id, "served")}>Mark Served</button>
-                  )}
-                  {order.status === "served" && (
-                    <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => updateStatus(order.id, "paid")}>Mark Paid ✓</button>
-                  )}
-                  {order.status === "paid" && (
-                    <span style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#22c55e" }}>✅ Completed</span>
-                  )}
+
+              {isExpanded && (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #334155" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span className={`badge badge-${order.status}`}>{order.status}</span>
+                      <span style={{ fontFamily: "'Lato', sans-serif", fontSize: 13, color: "#94a3b8" }}>
+                        Table {order.tableId} | {order.time}
+                      </span>
+                    </div>
+                    <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#38bdf8", fontWeight: 700 }}>Rs {order.total}</div>
+                  </div>
+                  <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 13, color: "#cbd5e1", marginTop: 8 }}>
+                    {getOrderItems(order)}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    {order.status === "preparing" && (
+                      <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => updateStatus(order.id, "served")}>Mark Served</button>
+                    )}
+                    {order.status === "served" && (
+                      <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => updateStatus(order.id, "paid")}>Mark Paid</button>
+                    )}
+                    {order.status === "paid" && (
+                      <span style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#22c55e" }}>Completed</span>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#38bdf8", marginBottom: 24 }}>
               Place New Order
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div><label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>SELECT TABLE</label>
-                <select value={form.tableId} onChange={e => setForm({ ...form, tableId: e.target.value })}>
+              <div>
+                <label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>SELECT TABLE</label>
+                <select value={form.tableId} onChange={(e) => setForm({ ...form, tableId: e.target.value })}>
                   <option value="">-- Choose Table --</option>
-                  {tables.map(t => <option key={t.id} value={t.id}>{t.name} ({t.seats} seats)</option>)}
-                </select></div>
-              <div><label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>CUSTOMER NAME</label>
-                <input value={form.customerName} onChange={e => setForm({ ...form, customerName: e.target.value })} placeholder="e.g. Amit Sharma" /></div>
+                  {tables.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.seats} seats)</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block" }}>CUSTOMER NAME</label>
+                <input value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} placeholder="e.g. Amit Sharma" />
+              </div>
               <div>
                 <label style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#94a3b8", marginBottom: 10, display: "block" }}>SELECT ITEMS</label>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
-                  {menu.filter(m => m.available).map(m => (
+                  {menu.filter((m) => m.available).map((m) => (
                     <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#1f2937", borderRadius: 8, border: "1px solid #475569" }}>
                       <div>
                         <div style={{ fontFamily: "'Lato', sans-serif", fontWeight: 600, color: "#cbd5e1", fontSize: 14 }}>{m.name}</div>
-                        <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#38bdf8" }}>₹{m.price}</div>
+                        <div style={{ fontFamily: "'Lato', sans-serif", fontSize: 12, color: "#38bdf8" }}>Rs {m.price}</div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <button onClick={() => setSelectedItems(p => ({ ...p, [m.id]: Math.max(0, (p[m.id] || 0) - 1) }))}
+                        <button onClick={() => setSelectedItems((p) => ({ ...p, [m.id]: Math.max(0, (p[m.id] || 0) - 1) }))}
                           style={{ background: "#475569", border: "none", color: "#e2e8f0", width: 28, height: 28, borderRadius: 6, cursor: "pointer", fontSize: 16 }}>-</button>
                         <span style={{ fontFamily: "'Lato', sans-serif", fontWeight: 700, color: "#38bdf8", minWidth: 20, textAlign: "center" }}>
                           {selectedItems[m.id] || 0}
                         </span>
-                        <button onClick={() => setSelectedItems(p => ({ ...p, [m.id]: (p[m.id] || 0) + 1 }))}
+                        <button onClick={() => setSelectedItems((p) => ({ ...p, [m.id]: (p[m.id] || 0) + 1 }))}
                           style={{ background: "#475569", border: "none", color: "#e2e8f0", width: 28, height: 28, borderRadius: 6, cursor: "pointer", fontSize: 16 }}>+</button>
                       </div>
                     </div>
@@ -739,8 +1335,8 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
               <div style={{ background: "#1f2937", padding: 14, borderRadius: 10, fontFamily: "'Lato', sans-serif" }}>
                 <span style={{ color: "#94a3b8" }}>Order Total: </span>
                 <span style={{ color: "#38bdf8", fontWeight: 700, fontSize: 18 }}>
-                  ₹{Object.entries(selectedItems).reduce((s, [id, qty]) => {
-                    const m = menu.find(m => m.id === +id);
+                  Rs {Object.entries(selectedItems).reduce((s, [id, qty]) => {
+                    const m = menu.find((x) => x.id === +id);
                     return s + (m ? m.price * qty : 0);
                   }, 0)}
                 </span>
@@ -757,7 +1353,7 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
   );
 }
 
-// ─── BILLING ─────────────────────────────────────────────────────
+// BILLING
 function Billing({ orders, setOrders, tables, menu, showNotification }) {
   const [selected, setSelected] = useState(null);
   const [paypalConfig, setPaypalConfig] = useState({
@@ -1223,3 +1819,4 @@ function Staff({ staff, setStaff, showNotification }) {
     </div>
   );
 }
+

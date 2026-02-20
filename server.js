@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { URL } = require("url");
 const { DatabaseSync } = require("node:sqlite");
 
@@ -39,7 +40,16 @@ const PAYPAL_CURRENCY = process.env.PAYPAL_CURRENCY || "USD";
 const PAYPAL_BUYER_COUNTRY = process.env.PAYPAL_BUYER_COUNTRY || "US";
 const BILLING_CURRENCY = process.env.BILLING_CURRENCY || "INR";
 const PAYPAL_INR_TO_USD_RATE = Number(process.env.PAYPAL_INR_TO_USD_RATE || "0.012");
+const ADMIN_USERNAME = process.env.AUTH_ADMIN_USERNAME || "Admin";
+const ADMIN_PASSWORD = process.env.AUTH_ADMIN_PASSWORD || "admin123";
+const EMPLOYEE_USERNAME = process.env.AUTH_EMPLOYEE_USERNAME || "employee";
+const EMPLOYEE_PASSWORD = process.env.AUTH_EMPLOYEE_PASSWORD || "employee123";
+const SESSION_COOKIE_NAME = "sg_session";
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 12;
 const db = new DatabaseSync(dbPath);
+const sessions = new Map();
+
+const DEFAULT_ADMIN_USER = { username: ADMIN_USERNAME, password: ADMIN_PASSWORD, role: "admin", name: "Administrator" };
 
 const DEFAULT_STATE = {
   tables: [
@@ -82,6 +92,54 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS auth_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'employee')),
+    name TEXT NOT NULL,
+    email TEXT NOT NULL DEFAULT '',
+    avatar_url TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+function ensureAuthUserColumns() {
+  const columns = db.prepare("PRAGMA table_info(auth_users)").all().map((col) => col.name);
+  if (!columns.includes("email")) {
+    db.exec("ALTER TABLE auth_users ADD COLUMN email TEXT NOT NULL DEFAULT '';");
+  }
+  if (!columns.includes("avatar_url")) {
+    db.exec("ALTER TABLE auth_users ADD COLUMN avatar_url TEXT NOT NULL DEFAULT '';");
+  }
+}
+
+ensureAuthUserColumns();
+
+function seedDefaultUsers() {
+  db.prepare(`
+    INSERT INTO auth_users (username, password, role, name, email, avatar_url)
+    VALUES (?, ?, ?, ?, '', '')
+    ON CONFLICT(username) DO UPDATE SET
+      password = excluded.password,
+      role = excluded.role,
+      name = excluded.name,
+      email = COALESCE(auth_users.email, ''),
+      avatar_url = COALESCE(auth_users.avatar_url, '')
+  `).run(DEFAULT_ADMIN_USER.username, DEFAULT_ADMIN_USER.password, DEFAULT_ADMIN_USER.role, DEFAULT_ADMIN_USER.name);
+
+  if (EMPLOYEE_USERNAME && EMPLOYEE_USERNAME !== DEFAULT_ADMIN_USER.username) {
+    db.prepare(`
+      INSERT INTO auth_users (username, password, role, name, email, avatar_url)
+      VALUES (?, ?, 'employee', 'Employee', '', '')
+      ON CONFLICT(username) DO NOTHING
+    `).run(EMPLOYEE_USERNAME, EMPLOYEE_PASSWORD);
+  }
+}
+
+seedDefaultUsers();
+
 function normalizeState(raw) {
   return {
     tables: Array.isArray(raw?.tables) ? raw.tables : DEFAULT_STATE.tables,
@@ -116,12 +174,13 @@ function saveState(state) {
   `).run(JSON.stringify(normalized));
 }
 
-function json(res, statusCode, payload) {
+function json(res, statusCode, payload, extraHeaders = {}) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,PUT,POST,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
+    ...extraHeaders,
   });
   res.end(JSON.stringify(payload));
 }
@@ -139,6 +198,113 @@ function readJsonBody(req) {
     });
     req.on("error", reject);
   });
+}
+
+function findUserByUsername(username) {
+  return db.prepare(`
+    SELECT username, password, role, name, email, avatar_url
+    FROM auth_users
+    WHERE username = ?
+    LIMIT 1
+  `).get(username);
+}
+
+function findUserByUsernameCaseInsensitive(username) {
+  return db.prepare(`
+    SELECT username, password, role, name, email, avatar_url
+    FROM auth_users
+    WHERE lower(username) = lower(?)
+    LIMIT 1
+  `).get(username);
+}
+
+function getPublicUser(user) {
+  return {
+    username: user.username,
+    role: user.role,
+    name: user.name,
+    email: user.email || "",
+    avatarUrl: user.avatar_url || "",
+  };
+}
+
+function createEmployeeUser({ username, password, name }) {
+  db.prepare(`
+    INSERT INTO auth_users (username, password, role, name, email, avatar_url)
+    VALUES (?, ?, 'employee', ?, '', '')
+  `).run(username, password, name || "Employee");
+}
+
+function updateUserProfile({ username, name, email, avatarUrl }) {
+  db.prepare(`
+    UPDATE auth_users
+    SET name = ?, email = ?, avatar_url = ?
+    WHERE username = ?
+  `).run(name, email, avatarUrl, username);
+}
+
+function updateUserPassword({ username, newPassword }) {
+  db.prepare(`
+    UPDATE auth_users
+    SET password = ?
+    WHERE username = ?
+  `).run(newPassword, username);
+}
+
+function parseCookies(req) {
+  const cookieHeader = req.headers.cookie || "";
+  const result = {};
+  for (const entry of cookieHeader.split(";")) {
+    const [rawKey, ...rawValueParts] = entry.trim().split("=");
+    if (!rawKey) continue;
+    result[rawKey] = decodeURIComponent(rawValueParts.join("=") || "");
+  }
+  return result;
+}
+
+function buildCookie(name, value, maxAgeSeconds) {
+  return `${name}=${encodeURIComponent(value)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
+}
+
+function clearExpiredSessions() {
+  const now = Date.now();
+  for (const [sessionId, session] of sessions.entries()) {
+    if (session.expiresAt <= now) sessions.delete(sessionId);
+  }
+}
+
+function createSession(user) {
+  clearExpiredSessions();
+  const sessionId = crypto.randomUUID();
+  sessions.set(sessionId, {
+    user: getPublicUser(user),
+    expiresAt: Date.now() + SESSION_MAX_AGE_SECONDS * 1000,
+  });
+  return sessionId;
+}
+
+function getSessionUser(req) {
+  clearExpiredSessions();
+  const cookies = parseCookies(req);
+  const sessionId = cookies[SESSION_COOKIE_NAME];
+  if (!sessionId) return null;
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  session.expiresAt = Date.now() + SESSION_MAX_AGE_SECONDS * 1000;
+  return session.user;
+}
+
+function requireAuth(req, res, roles = null) {
+  const user = getSessionUser(req);
+  if (!user) {
+    json(res, 401, { ok: false, error: "Unauthorized. Please login first." });
+    return null;
+  }
+  if (Array.isArray(roles) && roles.length > 0 && !roles.includes(user.role)) {
+    json(res, 403, { ok: false, error: "Forbidden for this role." });
+    return null;
+  }
+  return user;
 }
 
 function isPaypalConfigured() {
@@ -250,12 +416,183 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/auth/me" && req.method === "GET") {
+    const user = getSessionUser(req);
+    if (!user) {
+      json(res, 401, { ok: false, error: "Not logged in." });
+      return;
+    }
+    json(res, 200, { ok: true, user });
+    return;
+  }
+
+  if (url.pathname === "/api/auth/login" && req.method === "POST") {
+    readJsonBody(req)
+      .then((parsed) => {
+        const username = String(parsed.username || "").trim();
+        const password = String(parsed.password || "");
+        const role = parsed.role === "employee" ? "employee" : "admin";
+        if (!username || !password) {
+          json(res, 400, { ok: false, error: "Username and password are required." });
+          return;
+        }
+        let userTemplate = findUserByUsername(username);
+        if (!userTemplate && role === "admin") {
+          userTemplate = findUserByUsernameCaseInsensitive(username);
+        }
+        if (!userTemplate || userTemplate.role !== role || userTemplate.password !== password) {
+          json(res, 401, { ok: false, error: "Invalid credentials." });
+          return;
+        }
+
+        const sessionId = createSession(userTemplate);
+        json(
+          res,
+          200,
+          { ok: true, user: getPublicUser(userTemplate) },
+          { "Set-Cookie": buildCookie(SESSION_COOKIE_NAME, sessionId, SESSION_MAX_AGE_SECONDS) }
+        );
+      })
+      .catch((err) => {
+        json(res, 400, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  if (url.pathname === "/api/auth/signup" && req.method === "POST") {
+    readJsonBody(req)
+      .then((parsed) => {
+        const username = String(parsed.username || "").trim();
+        const password = String(parsed.password || "");
+        const name = String(parsed.name || "").trim();
+        if (!username || !password) {
+          json(res, 400, { ok: false, error: "Username and password are required." });
+          return;
+        }
+        if (username.length < 3) {
+          json(res, 400, { ok: false, error: "Username must be at least 3 characters." });
+          return;
+        }
+        if (password.length < 6) {
+          json(res, 400, { ok: false, error: "Password must be at least 6 characters." });
+          return;
+        }
+        if (findUserByUsername(username)) {
+          json(res, 409, { ok: false, error: "Username already exists." });
+          return;
+        }
+
+        createEmployeeUser({ username, password, name });
+        json(res, 201, {
+          ok: true,
+          message: "Employee account created. Please login.",
+        });
+      })
+      .catch((err) => {
+        if (String(err?.message || "").includes("UNIQUE")) {
+          json(res, 409, { ok: false, error: "Username already exists." });
+          return;
+        }
+        json(res, 400, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  if (url.pathname === "/api/auth/logout" && req.method === "POST") {
+    const cookies = parseCookies(req);
+    const sessionId = cookies[SESSION_COOKIE_NAME];
+    if (sessionId) sessions.delete(sessionId);
+    json(res, 200, { ok: true }, { "Set-Cookie": buildCookie(SESSION_COOKIE_NAME, "", 0) });
+    return;
+  }
+
+  if (url.pathname === "/api/auth/profile" && req.method === "GET") {
+    const sessionUser = requireAuth(req, res, ["admin", "employee"]);
+    if (!sessionUser) return;
+    const user = findUserByUsername(sessionUser.username);
+    if (!user) {
+      json(res, 404, { ok: false, error: "User not found." });
+      return;
+    }
+    json(res, 200, { ok: true, user: getPublicUser(user) });
+    return;
+  }
+
+  if (url.pathname === "/api/auth/profile" && req.method === "PUT") {
+    const sessionUser = requireAuth(req, res, ["admin", "employee"]);
+    if (!sessionUser) return;
+    readJsonBody(req)
+      .then((parsed) => {
+        const name = String(parsed.name || "").trim();
+        const email = String(parsed.email || "").trim();
+        const avatarUrl = String(parsed.avatarUrl || "").trim();
+        if (!name) {
+          json(res, 400, { ok: false, error: "Name is required." });
+          return;
+        }
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          json(res, 400, { ok: false, error: "Invalid email format." });
+          return;
+        }
+        updateUserProfile({ username: sessionUser.username, name, email, avatarUrl });
+        const updated = findUserByUsername(sessionUser.username);
+        if (!updated) {
+          json(res, 404, { ok: false, error: "User not found after update." });
+          return;
+        }
+        const sessionId = parseCookies(req)[SESSION_COOKIE_NAME];
+        if (sessionId && sessions.has(sessionId)) {
+          const session = sessions.get(sessionId);
+          session.user = getPublicUser(updated);
+          sessions.set(sessionId, session);
+        }
+        json(res, 200, { ok: true, user: getPublicUser(updated) });
+      })
+      .catch((err) => {
+        json(res, 400, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  if (url.pathname === "/api/auth/change-password" && req.method === "POST") {
+    const sessionUser = requireAuth(req, res, ["admin", "employee"]);
+    if (!sessionUser) return;
+    readJsonBody(req)
+      .then((parsed) => {
+        const currentPassword = String(parsed.currentPassword || "");
+        const newPassword = String(parsed.newPassword || "");
+        if (!currentPassword || !newPassword) {
+          json(res, 400, { ok: false, error: "Current and new password are required." });
+          return;
+        }
+        if (newPassword.length < 6) {
+          json(res, 400, { ok: false, error: "New password must be at least 6 characters." });
+          return;
+        }
+        const user = findUserByUsername(sessionUser.username);
+        if (!user || user.password !== currentPassword) {
+          json(res, 401, { ok: false, error: "Current password is incorrect." });
+          return;
+        }
+        updateUserPassword({ username: sessionUser.username, newPassword });
+        json(res, 200, { ok: true, message: "Password updated successfully." });
+      })
+      .catch((err) => {
+        json(res, 400, { ok: false, error: err.message });
+      });
+    return;
+  }
+
   if (url.pathname === "/api/state" && req.method === "GET") {
+    const user = requireAuth(req, res, ["admin", "employee"]);
+    if (!user) return;
     json(res, 200, getState());
     return;
   }
 
   if (url.pathname === "/api/state" && req.method === "PUT") {
+    const user = requireAuth(req, res, ["admin", "employee"]);
+    if (!user) return;
     readJsonBody(req)
       .then((parsed) => {
         saveState(parsed);
@@ -268,6 +605,8 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === "/api/paypal/config" && req.method === "GET") {
+    const user = requireAuth(req, res, ["admin", "employee"]);
+    if (!user) return;
     json(res, 200, {
       enabled: isPaypalConfigured(),
       clientId: PAYPAL_CLIENT_ID,
@@ -281,6 +620,8 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === "/api/paypal/create-order" && req.method === "POST") {
+    const user = requireAuth(req, res, ["admin", "employee"]);
+    if (!user) return;
     readJsonBody(req)
       .then(async (parsed) => {
         if (!isPaypalConfigured()) {
@@ -336,6 +677,8 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === "/api/paypal/capture-order" && req.method === "POST") {
+    const user = requireAuth(req, res, ["admin", "employee"]);
+    if (!user) return;
     readJsonBody(req)
       .then(async (parsed) => {
         if (!isPaypalConfigured()) {
