@@ -1171,12 +1171,40 @@ function MenuPage({ menu, setMenu, showNotification }) {
 
 // ─── ORDERS ──────────────────────────────────────────────────────
 function Orders({ orders, setOrders, tables, menu, showNotification }) {
+  const getEmptyOrderForm = () => ({ tableId: "", customerName: "", items: [] });
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ tableId: "", customerName: "", items: [] });
+  const [form, setForm] = useState(getEmptyOrderForm);
   const [selectedItems, setSelectedItems] = useState({});
   const [expandedOrderId, setExpandedOrderId] = useState(null);
+  const [editingOrderId, setEditingOrderId] = useState(null);
 
-  const addOrder = () => {
+  const closeOrderModal = () => {
+    setShowModal(false);
+    setEditingOrderId(null);
+    setForm(getEmptyOrderForm());
+    setSelectedItems({});
+  };
+
+  const startNewOrder = () => {
+    setEditingOrderId(null);
+    setForm(getEmptyOrderForm());
+    setSelectedItems({});
+    setShowModal(true);
+  };
+
+  const openEditOrder = (order) => {
+    const prefills = order.items.reduce((acc, item) => ({ ...acc, [item.menuId]: item.qty }), {});
+    setEditingOrderId(order.id);
+    setForm({
+      tableId: String(order.tableId ?? ""),
+      customerName: order.customerName || "",
+      items: order.items || [],
+    });
+    setSelectedItems(prefills);
+    setShowModal(true);
+  };
+
+  const saveOrder = () => {
     const items = Object.entries(selectedItems)
       .filter(([, qty]) => qty > 0)
       .map(([menuId, qty]) => ({ menuId: +menuId, qty }));
@@ -1194,6 +1222,25 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
     const now = new Date();
     const time = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 
+    if (editingOrderId !== null) {
+      setOrders(
+        orders.map((o) =>
+          o.id === editingOrderId
+            ? {
+                ...o,
+                tableId: +form.tableId,
+                customerName: form.customerName.trim(),
+                items,
+                total,
+              }
+            : o
+        )
+      );
+      showNotification("Order updated!");
+      closeOrderModal();
+      return;
+    }
+
     setOrders([
       ...orders,
       {
@@ -1207,9 +1254,7 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
       },
     ]);
     tables.find((t) => t.id === +form.tableId) && showNotification("New order placed!");
-    setShowModal(false);
-    setForm({ tableId: "", customerName: "", items: [] });
-    setSelectedItems({});
+    closeOrderModal();
   };
 
   const updateStatus = (id, status) => {
@@ -1234,7 +1279,7 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
             {orders.filter((o) => o.status !== "paid").length} active orders
           </div>
         </div>
-        <button className="btn-primary" onClick={() => setShowModal(true)}>+ New Order</button>
+        <button className="btn-primary" onClick={startNewOrder}>+ New Order</button>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1275,6 +1320,11 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
                     {getOrderItems(order)}
                   </div>
                   <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    {order.status !== "paid" && (
+                      <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => openEditOrder(order)}>
+                        Edit Order
+                      </button>
+                    )}
                     {order.status === "preparing" && (
                       <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => updateStatus(order.id, "served")}>Mark Served</button>
                     )}
@@ -1293,10 +1343,10 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
       </div>
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <div className="modal-overlay" onClick={closeOrderModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#38bdf8", marginBottom: 24 }}>
-              Place New Order
+              {editingOrderId !== null ? `Edit Order #${editingOrderId}` : "Place New Order"}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div>
@@ -1342,8 +1392,10 @@ function Orders({ orders, setOrders, tables, menu, showNotification }) {
                 </span>
               </div>
               <div style={{ display: "flex", gap: 12 }}>
-                <button className="btn-primary" style={{ flex: 1 }} onClick={addOrder}>Place Order</button>
-                <button className="btn-outline" style={{ flex: 1 }} onClick={() => setShowModal(false)}>Cancel</button>
+                <button className="btn-primary" style={{ flex: 1 }} onClick={saveOrder}>
+                  {editingOrderId !== null ? "Save Changes" : "Place Order"}
+                </button>
+                <button className="btn-outline" style={{ flex: 1 }} onClick={closeOrderModal}>Cancel</button>
               </div>
             </div>
           </div>
